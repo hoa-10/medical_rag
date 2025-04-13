@@ -34,6 +34,7 @@ def extract_text_from_pdf(pdf_path, poppler_path=None):
             except:
                 pass
 #HEllo
+#this is the test for the pdf extraction
 #pdf_file = "11. HDSD.pdf"
 poppler_path = r"C:\Users\Admin\Desktop\medical_rag\poppler-24.08.0\Library\bin" 
 #extracted_text = extract_text_from_pdf(pdf_file, poppler_path)
