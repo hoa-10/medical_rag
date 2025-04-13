@@ -7,15 +7,14 @@ from Retriever_memory import SemanticMemoryRetriever
 from langgraph.graph import START, END, StateGraph
 from format import format_response_for_display
 
-# Initialize memory systems
+
 memory = ConservationMemory()
 semantic_memory = SemanticMemoryRetriever()
 semantic_memory.add_memory(memory.get_all_history())
 
-# Define the workflow
 workflow = StateGraph(State)
 
-# Add the nodes
+
 workflow.add_node("retrieve_memory", retrieve_memory)
 workflow.add_node("retrieve", retrieve)
 workflow.add_node("grade_document", evaluate_document)
@@ -24,7 +23,7 @@ workflow.add_node("transform_query", transform_query)
 workflow.add_node("web_search_tool", web_search)
 workflow.add_node("update_history", update_history)
 
-# Define the edges
+
 workflow.add_edge(START, "retrieve_memory")
 workflow.add_edge("retrieve_memory", "retrieve")
 workflow.add_edge("retrieve", "grade_document")
@@ -63,10 +62,10 @@ def chat_with_rag():
         initial_state = {
             "question": user_input,
             "chat_history": chat_history,
-            "document": [],  # Initialize empty document list
-            "generation": "",  # Initialize empty generation string
-            "web_search": "no",  # Initialize web_search flag
-            "memory_context": ""  # Initialize empty memory context
+            "document": [],  
+            "generation": "",  
+            "web_search": "no",  
+            "memory_context": ""  
         }
         
         for output in app.stream(initial_state):
