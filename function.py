@@ -96,7 +96,7 @@ def retrieve(state: State) -> Dict[str, Any]:
         "memory_context": state.get("memory_context", "")
     }
 
-
+#Evaluting the document
 def evaluate_document(state: State) -> Dict[str, Any]:
     """Evaluate document relevance to the question."""
     print("\n=== DOCUMENT EVALUATION PHASE ===")

@@ -2,8 +2,8 @@ from typing import List, Dict, Optional
 import json
 import os
 from datetime import datetime
-import uuid
 
+# This class is used to manage the conversation history and save it to a file.
 class ConservationMemory:
     def __init__(self, file_path= "conservation_history.json",max_history_length = 1000):
         self.file_path = file_path

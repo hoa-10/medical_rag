@@ -12,7 +12,7 @@ embedding = HuggingFaceEmbeddings(
     model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
     model_kwargs = {"device": "cpu"}
 )
-
+## Initialize the Chroma vector store
 def process_all_pdf(pdf_dir, persist_dir='pdf_database'):
     """
     Process all PDFs in a directory and create/load a vector database for RAG.
