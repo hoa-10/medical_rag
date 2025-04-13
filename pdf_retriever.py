@@ -9,8 +9,9 @@ from Ocr import extract_text_from_pdf, poppler_path
 from langchain.schema import Document
 
 embedding = HuggingFaceEmbeddings(
-    model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-    model_kwargs = {"device": "cpu"}
+    model_name="BAAI/bge-m3",
+    model_kwargs={"device": "cpu"},
+    cache_folder="D:\\model_embedding"
 )
 ## Initialize the Chroma vector store
 def process_all_pdf(pdf_dir, persist_dir='pdf_database'):
