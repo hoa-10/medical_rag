@@ -8,9 +8,10 @@ from langchain_tavily import TavilySearch
 from conversationMemory import ConservationMemory
 from Retriever_memory import SemanticMemoryRetriever
 from datetime import datetime
-from langgraph.constants import Send
+
 from agent import rag_llm
 from dotenv import load_dotenv
+from processing_document import process_all_filepdf
 
 load_dotenv("api.env")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
@@ -34,10 +35,10 @@ class State(TypedDict):
     memory_context: str
 
 
-def _get_query_text(question: Any) -> str:
-    """Extract query text from question object or string."""
-    if isinstance(question, dict):
-        return question.get("text", str(question))
+def _get_query_text(question):
+    """Extract query text from question object or string"""
+    if isinstance(question, dict) and "text" in question:
+        return question["text"]
     return str(question)
 
 
@@ -61,7 +62,7 @@ def retrieve_memory(state: State) -> Dict[str, Any]:
     }
 
 
-def retrieve(state: State) -> Dict[str, Any]:
+def retrieve(state: Dict[str, Any]) -> Dict[str, Any]:
     """Retrieve documents based on the question using available retrievers."""
     print("\n=== DOCUMENT RETRIEVAL PHASE ===")
     print("1. Processing query...")
@@ -73,7 +74,8 @@ def retrieve(state: State) -> Dict[str, Any]:
     pdf_path = r"C:\Users\Admin\Desktop\medical_rag\folder_pdf"
     try:
         print("\n2. Searching PDF documents...")
-        retriever = process_all_pdf(pdf_dir=pdf_path)
+        # Use hybrid search by default
+        retriever = process_all_filepdf(pdf_dir=pdf_path, use_hybrid=True)
         main_docs = retriever.get_relevant_documents(query)
         documents.extend(main_docs)
         print(f"📚 Retrieved {len(main_docs)} documents from database")
@@ -83,6 +85,10 @@ def retrieve(state: State) -> Dict[str, Any]:
             preview = doc.page_content[:100] + "..." if len(doc.page_content) > 100 else doc.page_content
             print(f"\nDocument {i}:")
             print(f"Preview: {preview}")
+            if "search_type" in doc.metadata:
+                print(f"Search type: {doc.metadata['search_type']}")
+            if "similarity" in doc.metadata:
+                print(f"Similarity score: {doc.metadata['similarity']:.4f}")
             
     except Exception as e:
         print(f"❌ Error retrieving from database: {e}")
