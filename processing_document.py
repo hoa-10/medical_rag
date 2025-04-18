@@ -11,12 +11,13 @@ import chromadb
 from classification_pageType import is_text, is_table_of_contents, is_image
 from llm_reasoning import analyze_image
 from langchain.embeddings import HuggingFaceEmbeddings
-
-
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from translation_query_language import translate_vi2en
+#model embedding 
 text_embedding_model = HuggingFaceEmbeddings(
     model_name="BAAI/bge-m3",
     model_kwargs={"device": "cpu"},
-    cache_folder="D:\\model_embedding"
+    cache_folder=r"C:\Users\user\model_embedding"
 )
 COLLECTION_NAME = "pdf-documents"
 def extract_text_from_pdf_page(pdf_path, page_number):
@@ -188,6 +189,8 @@ def process_pdf_documents(pdf_dir, persist_dir="./chroma_db"):
 
 def query_document(query_text, retriever=None, persist_dir="./chroma_database"):
     """Truy vấn vector database dựa trên câu hỏi"""
+    query_user = translate_vi2en(query_text)
+    print(query_user)
     if retriever is None:
         # Tải lại retriever nếu chưa được cung cấp
         try:
@@ -203,7 +206,7 @@ def query_document(query_text, retriever=None, persist_dir="./chroma_database"):
     
     try:
         # Truy vấn các tài liệu liên quan
-        docs = retriever.get_relevant_documents(query_text)
+        docs = retriever.get_relevant_documents(query_user)
         return docs
     except Exception as e:
         print(f"Lỗi khi truy vấn vector store: {e}")

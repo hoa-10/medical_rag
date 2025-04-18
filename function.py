@@ -9,7 +9,7 @@ from langchain_tavily import TavilySearch
 from conversationMemory import ConservationMemory
 from Retriever_memory import SemanticMemoryRetriever
 from datetime import datetime
-
+from translation_query_language import translate_vi2en
 from processing_document import process_pdf_documents, query_document
 # Initialize environment variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBWZUIJAUu4PYGXH7lSfUS9mjUgTdK7CWc")
@@ -46,7 +46,7 @@ def _get_query_text(question: Any) -> str:
     """Extract query text from question object or string."""
     if isinstance(question, dict):
         return question.get("text", str(question))
-    return str(question)
+    return str(translate_vi2en(question))
 
 
 def retrieve_memory(state: State) -> Dict[str, Any]:
@@ -181,6 +181,11 @@ def update_history(state: State) -> Dict[str, Any]:
     """Update conversation history with the latest interaction"""
     question = state["question"]
     generation = state["generation"]
+    
+    # Parse the generation again to ensure it's clean
+    # This is a safeguard in case the raw response somehow made it through
+    clean_generation = parse_bot_response(generation)
+    
     chat_history = state.get("chat_history", [])
     memory_context = state.get("memory_context", "")
 
@@ -190,12 +195,12 @@ def update_history(state: State) -> Dict[str, Any]:
         "memory_used": bool(memory_context and memory_context != "No relevant past conversations found.")
     }
 
-    chat_history.append({"user": question, "bot": generation})
+    chat_history.append({"user": question, "bot": clean_generation})
 
-    memory.add_interaction(question, generation, metadata)
+    memory.add_interaction(question, clean_generation, metadata)
     semantic_memory.add_memory([{
         "user": question,
-        "bot": generation, 
+        "bot": clean_generation, 
         "timestamp": datetime.now().isoformat(),
         "session_id": memory.session_id
     }])
@@ -203,7 +208,7 @@ def update_history(state: State) -> Dict[str, Any]:
     return {
         "document": state["document"],
         "question": question,
-        "generation": generation,
+        "generation": clean_generation,  # Return the clean generation
         "chat_history": chat_history,
         "memory_context": memory_context
     }
@@ -310,7 +315,10 @@ def generate(state: State) -> Dict[str, Any]:
             f"Answer:"
         )
         response = rag_llm.invoke(prompt)
-        generation_result = str(response)
+        raw_response = str(response)
+        
+        # Parse the response to extract only the content
+        generation_result = parse_bot_response(raw_response)
     except Exception as e:
         print(f"Error generating response: {e}")
         generation_result = "Sorry, I couldn't generate a response due to an error."
@@ -318,8 +326,19 @@ def generate(state: State) -> Dict[str, Any]:
     return {
         "document": documents, 
         "question": question, 
-        "generation": generation_result,
+        "generation": generation_result,  # Now contains only the clean content
         "chat_history": chat_history,
         "memory_context": memory_context
-    
     }
+
+def parse_bot_response(bot_response):
+
+    if "content='" in bot_response:
+        start_index = bot_response.find("content='") + 9
+        end_index = bot_response.find("'", start_index)
+        
+        if start_index >= 9 and end_index > start_index:
+            content = bot_response[start_index:end_index]
+            content = content.replace("\\'", "'").replace("\\n", "\n").replace("\\\"", "\"")
+            return content
+    return bot_response
