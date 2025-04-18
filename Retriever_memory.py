@@ -21,7 +21,7 @@ class SemanticMemoryRetriever:
                 self.memory_entries.append(entry)
             except Exception as e:
                 print(f"Errors embedding memory: {e}")
-    def retrieve_relevant_memory(self, query: str, top_k : int = 3)  -> List[Document]:
+    def retrieve_relevant_memories(self, query: str, top_k : int = 3)  -> List[Document]:
         if not self.memory_embedding:
             return []
 

@@ -1,20 +1,27 @@
-from typing import Dict, List, Any, Optional
+from typing import List, Dict, Any, Optional
 from typing_extensions import TypedDict
-from pdf_retriever import process_all_pdf
+
 import os
 from agent import retrieve_grader, question_rewriter
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.schema import Document
 from langchain_tavily import TavilySearch
 from conversationMemory import ConservationMemory
 from Retriever_memory import SemanticMemoryRetriever
 from datetime import datetime
 
-from agent import rag_llm
-from dotenv import load_dotenv
-from processing_document import process_all_filepdf
-
-load_dotenv("api.env")
+from processing_document import process_pdf_documents, query_document
+# Initialize environment variables
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBWZUIJAUu4PYGXH7lSfUS9mjUgTdK7CWc")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
+
+
+rag_llm = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash",
+    api_key=GEMINI_API_KEY
+)
+
 web_search_tool = TavilySearch(
     api_key=TAVILY_API_KEY,
     max_results=5,
@@ -35,19 +42,19 @@ class State(TypedDict):
     memory_context: str
 
 
-def _get_query_text(question):
-    """Extract query text from question object or string"""
-    if isinstance(question, dict) and "text" in question:
-        return question["text"]
+def _get_query_text(question: Any) -> str:
+    """Extract query text from question object or string."""
+    if isinstance(question, dict):
+        return question.get("text", str(question))
     return str(question)
 
 
 def retrieve_memory(state: State) -> Dict[str, Any]:
     """Retrieve relevant memories based on the question."""
-    print("---RETRIEVING MEMORIES HISTORY---")
+    print("---RETRIEVING MEMORIES---")
     
     query = _get_query_text(state["question"])
-    memory_docs = semantic_memory.retrieve_relevant_memory(query, top_k=3)
+    memory_docs = semantic_memory.retrieve_relevant_memories(query, top_k=3)
     
     if memory_docs:
         print(f"Retrieved {len(memory_docs)} relevant memories")
@@ -62,39 +69,45 @@ def retrieve_memory(state: State) -> Dict[str, Any]:
     }
 
 
-def retrieve(state: Dict[str, Any]) -> Dict[str, Any]:
+def retrieve(state: State) -> Dict[str, Any]:
     """Retrieve documents based on the question using available retrievers."""
-    print("\n=== DOCUMENT RETRIEVAL PHASE ===")
-    print("1. Processing query...")
+    print("--RETRIEVE--")
     
     query = _get_query_text(state["question"])
-    print(f"📝 Query: '{query}'")
+    print(f"Query: {query}")
     
     documents = []
-    pdf_path = r"C:\Users\Admin\Desktop\medical_rag\folder_pdf"
+
     try:
-        print("\n2. Searching PDF documents...")
-        # Use hybrid search by default
-        retriever = process_all_filepdf(pdf_dir=pdf_path, use_hybrid=True)
-        main_docs = retriever.get_relevant_documents(query)
-        documents.extend(main_docs)
-        print(f"📚 Retrieved {len(main_docs)} documents from database")
+        # Sử dụng hàm query_document thay vì trực tiếp gọi processing_pdf_document
+        # Điều này sẽ tái sử dụng vector store nếu đã tồn tại
+        retriever = process_pdf_documents(pdf_dir='pdf_database')
         
-        # Print brief preview of each document
-        for i, doc in enumerate(main_docs, 1):
-            preview = doc.page_content[:100] + "..." if len(doc.page_content) > 100 else doc.page_content
-            print(f"\nDocument {i}:")
-            print(f"Preview: {preview}")
-            if "search_type" in doc.metadata:
-                print(f"Search type: {doc.metadata['search_type']}")
-            if "similarity" in doc.metadata:
-                print(f"Similarity score: {doc.metadata['similarity']:.4f}")
-            
+        if retriever:
+            main_docs = query_document(query, retriever)
+            documents.extend(main_docs)
+            print(f"Retrieved documents from main retriever: {len(main_docs)}")
+        else:
+
+            main_docs = query_document(query)
+            if main_docs:
+                documents.extend(main_docs)
+                print(f"Retrieved documents using direct query: {len(main_docs)}")
+            else:
+                print("Không thể truy vấn từ vector database")
     except Exception as e:
-        print(f"❌ Error retrieving from database: {e}")
+        print(f"Error retrieving from vector database: {e}")
+        # Thử truy vấn trực tiếp nếu có lỗi
+        try:
+            fallback_docs = query_document(query)
+            if fallback_docs:
+                documents.extend(fallback_docs)
+                print(f"Retrieved documents using fallback method: {len(fallback_docs)}")
+        except Exception as fallback_error:
+            print(f"Fallback query also failed: {fallback_error}")
 
     if not documents:
-        print("⚠️ No documents retrieved from any source")
+        print("No documents retrieved from any source")
                 
     return {
         "document": documents, 
@@ -102,49 +115,59 @@ def retrieve(state: Dict[str, Any]) -> Dict[str, Any]:
         "memory_context": state.get("memory_context", "")
     }
 
-#Evaluting the document
+
 def evaluate_document(state: State) -> Dict[str, Any]:
     """Evaluate document relevance to the question."""
-    print("\n=== DOCUMENT EVALUATION PHASE ===")
+    print("---Check document relevant to question---")
     
     question = state['question']
     documents = state["document"]
     memory_context = state.get("memory_context", "")
     filtered_docs = []
     
-    print(f"📊 Evaluating {len(documents)} documents for relevance...")
+    # Thêm kiểm tra cho trường hợp không có documents
+    if not documents:
+        print("No documents to evaluate")
+        return {
+            "document": [], 
+            "question": question, 
+            "web_search": "yes",  # Đề xuất web search khi không có tài liệu
+            "memory_context": memory_context
+        }
     
-    for i, doc in enumerate(documents, 1):
+    for doc in documents:
         try:
-            print(f"\nAnalyzing Document {i}:")
+            # Thêm thông tin để debug
+            print(f"Evaluating document: {doc.page_content[:50]}...")
+            
             score = retrieve_grader.invoke({
                 "question": question,
                 "document": doc.page_content
             })
             
             if score.binary_score.lower() == "yes":
-                print("✅ Document marked as RELEVANT")
+                print("---Document relevant---")
                 filtered_docs.append(doc)
             else:
-                print("❌ Document marked as NOT RELEVANT")
+                print(f"---Document not relevant--- Score: {score.binary_score}")
         except Exception as e:
             print(f"Error evaluating document: {e}")
+            filtered_docs.append(doc)
+            print("Added document despite evaluation error")
     
-    # Calculate and display relevance statistics
     total_docs = len(documents)
     relevant_docs = len(filtered_docs)
-    relevance_ratio = relevant_docs / total_docs if total_docs > 0 else 0
-    print(f"\n📈 Relevance Statistics:")
-    print(f"- Total Documents: {total_docs}")
-    print(f"- Relevant Documents: {relevant_docs}")
-    print(f"- Relevance Ratio: {relevance_ratio:.2%}")
     
-    # Decide if web search is needed
-    web_search_needed = 'yes' if documents and relevance_ratio <= 0.1 else 'no'
-    print(f"\n🔍 Web Search Decision:")
-    print(f"- Need web search: {web_search_needed.upper()}")
-    if web_search_needed == 'yes':
-        print("- Reason: Less than 50% of documents were relevant")
+    if total_docs == 0 or (relevant_docs / total_docs) <= 0.5:
+        web_search_needed = 'yes'
+        print(f"Web search recommended: {relevant_docs}/{total_docs} relevant docs")
+    elif relevant_docs >= 3:
+        web_search_needed = 'no'
+        print(f"Enough relevant docs ({relevant_docs}), no web search needed")
+    # Tỉ lệ tương đối (>50% nhưng <3 tài liệu)
+    else:
+        web_search_needed = 'yes'
+        print("Some relevant docs but not enough, web search recommended")
     
     return {
         "document": filtered_docs, 
@@ -188,20 +211,17 @@ def update_history(state: State) -> Dict[str, Any]:
 
 def transform_query(state: State) -> Dict[str, Any]:
     """Transform the query to improve retrieval."""
-    print("\n=== QUERY TRANSFORMATION PHASE ===")
+    print("---Transform query---")
     
     question = state['question']
     documents = state['document']
     memory_context = state.get("memory_context", "")
     
-    print(f"Original query: '{question}'")
-    
     try:
         better_question = question_rewriter.invoke({"question": question})
-        print(f"✨ Transformed query: '{better_question}'")
+        print(f"Transformed query: {better_question}")
     except Exception as e:
-        print(f"❌ Error transforming query: {e}")
-        print("Using original query instead")
+        print(f"Error transforming query: {e}")
         better_question = question
     
     return {
@@ -213,78 +233,51 @@ def transform_query(state: State) -> Dict[str, Any]:
 
 def web_search(state: State) -> Dict[str, Any]:
     """Perform web search and add results to documents."""
-    print("\n=== WEB SEARCH PHASE ===")
+    print("---WEB SEARCH---")
+    
     question = state["question"]
     documents = state['document']
     memory_context = state.get("memory_context", "")
     
-    print(f"🌐 Searching web for: '{question}'")
     try:
         search_results = web_search_tool.invoke({"query": question})
-        
         if search_results:
-            # Process web content for documents
-            web_contents = []
-            for d in search_results:
-                if isinstance(d, dict) and 'content' in d:
-                    web_contents.append(d['content'])
-            
-            if web_contents:
-                web_content = "\n\n".join(web_contents)
-                web_result = Document(page_content=web_content)
-                documents.append(web_result)
-                print(f"✅ Added {len(web_contents)} web search results")
-            
-            # Preview web results - separate try block to isolate any issues
-            try:
-                print("\nWeb Search Results Preview:")
-                preview_count = min(3, len(search_results))
-                
-                for i in range(preview_count):
-                    result = search_results[i]
-                    if isinstance(result, dict) and 'content' in result:
-                        content = result['content']
-                        preview = content[:100] + "..." if len(content) > 100 else content
-                        print(f"{i+1}. {preview}")
-            except Exception as e:
-                print(f"⚠️ Error during preview generation: {str(e)}")
-                
+            web_content = "\n\n".join([d.get('content', '') for d in search_results if 'content' in d])
+            web_result = Document(page_content=web_content)
+            documents.append(web_result)
+            print(f"Added web search results ({len(search_results)} items)")
     except Exception as e:
-        print(f"❌ Error during web search: {e}")
+        print(f"Error during web search: {e}")
     
     return {
-        "document": documents,
+        "document": documents, 
         "question": question,
         "memory_context": memory_context
     }
 
+
 def decide_next_step(state: State) -> str:
     """Decide the next step in the pipeline."""
-    print("\n=== DECISION PHASE ===")
+    print("---ASSESS DOCUMENT QUALITY---")
     
     web_search_needed = state.get("web_search", "").lower()
     
-    print("🤔 Evaluating next step...")
     if web_search_needed == "yes":
-        print("Decision: Documents not sufficiently relevant")
-        print("Action: Will transform query and perform web search")
+        print("--DECISION: DOCUMENTS NOT SUFFICIENTLY RELEVANT, TRANSFORM QUERY---")
         return "transform_query"
     else:
-        print("Decision: Sufficient relevant documents found")
-        print("Action: Proceeding to generate response")
+        print("---DECISION: GENERATE RESPONSE---")
         return "generate"
 
 
 def generate(state: State) -> Dict[str, Any]:
     """Generate a response based on the question, documents, memory and conversation history."""
-    print("\n=== RESPONSE GENERATION PHASE ===")
+    print('---GENERATE---')
     
     question = state["question"]
     documents = state["document"]
     chat_history = state.get("chat_history", [])
     memory_context = state.get("memory_context", "")
-    
-    print("1. Preparing Context...")
     
     # Format documents for context
     formatted_texts = []
@@ -298,19 +291,16 @@ def generate(state: State) -> Dict[str, Any]:
                 formatted_texts.append(doc["page_content"])
     
     context = "\n\n".join(formatted_texts) if formatted_texts else "No relevant documents found."
-    print(f"📚 Using {len(formatted_texts)} documents as context")
     
-    # Format recent conversation history
+    # Format recent conversation history (last 3 interactions)
     history_context = ""
     if chat_history:
         history_context = "Previous conversation:\n"
-        recent_history = chat_history[-3:]  # Last 3 interactions
-        print(f"💭 Including {len(recent_history)} recent conversation turns")
-        for interaction in recent_history:
+        for interaction in chat_history[-3:]:
             if "user" in interaction and "bot" in interaction:
                 history_context += f"User: {interaction['user']}\nAssistant: {interaction['bot']}\n\n"
     
-    print("\n2. Generating Response...")
+    # Generate response with all context
     try:
         prompt = (
             f"Long-term memories from past conversations:\n{memory_context}\n\n"
@@ -321,9 +311,8 @@ def generate(state: State) -> Dict[str, Any]:
         )
         response = rag_llm.invoke(prompt)
         generation_result = str(response)
-        print("✅ Response generated successfully")
     except Exception as e:
-        print(f"❌ Error generating response: {e}")
+        print(f"Error generating response: {e}")
         generation_result = "Sorry, I couldn't generate a response due to an error."
     
     return {
@@ -332,4 +321,5 @@ def generate(state: State) -> Dict[str, Any]:
         "generation": generation_result,
         "chat_history": chat_history,
         "memory_context": memory_context
+    
     }
